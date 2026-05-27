@@ -1,0 +1,52 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Virtual environments ───────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+ENV/
+
+# ── Data & generated files (do NOT commit real government data) ────────────────
+data/jan_aadhaar_demo.sqlite
+data/schema.faiss
+data/schema_metadata.json
+data/streamlit.stdout.log
+data/streamlit.stderr.log
+
+# ── Dummy dataset Excel (large binary, tracked separately if needed) ───────────
+# Uncomment the line below if you don't want the Excel file on GitHub
+# dummy_dataset/
+
+# ── Scratch / temp files ───────────────────────────────────────────────────────
+scratch/
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── IDE / OS ──────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.suo
+*.user
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Environment / secrets ─────────────────────────────────────────────────────
+.env
+.env.*
+*.key
+*.pem
+
+# ── Misc ──────────────────────────────────────────────────────────────────────
+21

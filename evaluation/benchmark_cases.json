@@ -1,0 +1,14 @@
+[
+  {
+    "question": "Show all female beneficiaries receiving pension in Jaipur district.",
+    "expected_sql": "SELECT member.member_name, family.jan_aadhaar_number, family.district FROM member JOIN family ON member.family_id = family.family_id JOIN scheme_benefits ON scheme_benefits.member_id = member.member_id WHERE member.gender = 'Female' AND family.district = 'Jaipur' AND scheme_benefits.pension_eligibility = 'Eligible' AND scheme_benefits.beneficiary_status = 'Active';"
+  },
+  {
+    "question": "How many SC category citizens live in Kotputli block?",
+    "expected_sql": "SELECT COUNT(member.member_id) AS citizen_count FROM member JOIN family ON member.family_id = family.family_id WHERE member.caste_category = 'SC' AND family.block = 'Kotputli';"
+  },
+  {
+    "question": "Show top 10 villages with maximum pension beneficiaries.",
+    "expected_sql": "SELECT family.village, COUNT(member.member_id) AS pension_beneficiaries FROM family JOIN member ON member.family_id = family.family_id JOIN scheme_benefits ON scheme_benefits.member_id = member.member_id WHERE scheme_benefits.pension_eligibility = 'Eligible' AND scheme_benefits.beneficiary_status = 'Active' GROUP BY family.village ORDER BY pension_beneficiaries DESC LIMIT 10;"
+  }
+]
