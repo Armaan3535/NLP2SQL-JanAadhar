@@ -106,17 +106,21 @@ def fuzzy_rerank(
             val_words = [w.strip() for w in val_lower.split() if w.strip()]
 
             # Strategy 1: full-string score
-            # "Palo Devi" vs "Palo Devi" → 1.0 (exact)
-            # "Pallavi Jain" vs "Palo Devi" → ~0.72 (partial)
+            # "Geeta Devi" vs "Geeta Devi" → 1.0 (exact)
+            # "Geeta Devi" vs "Geeta"        → ~0.77 (different — surname missing)
+            # "Geeta Devi" vs "Geeta Choudhary" → ~0.82 (different surname)
             full_score = JaroWinkler.similarity(target_lower, val_lower)
             if full_score > 1.0:
                 full_score = full_score / 100.0
 
-            # Strategy 2: per-word cross score
-            # Each target word vs each DB name word independently.
-            # Handles: single-word target "Palo" → ["Palo", "Devi"] finds "Palo" at 1.0
+            # Strategy 2: per-word cross score — ONLY for single-word targets.
+            # When the user types one word (e.g. "Geeta"), match it against each
+            # word in a multi-word DB name so "Geeta Devi" is still found.
+            # NOT used for multi-word targets: otherwise "Geeta" (DB) would score
+            # 1.0 against target "Geeta Devi" by matching just the first word.
             best_word_score = 0.0
-            for t_word in target_words:
+            if len(target_words) == 1:
+                t_word = target_words[0]
                 for v_word in val_words:
                     len_diff = abs(len(v_word) - len(t_word))
                     is_prefix_match = len(t_word) >= 4 and v_word.startswith(t_word)
