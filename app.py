@@ -173,21 +173,29 @@ def _post_process_sql(sql: str, fuzzy_target: str | None = None) -> str:
         )
 
     # ── Step 1.1: Caste IN Clause Expansion ──────────────────────────────────
-    # Replaces IN clauses for castes with the full bilingual group.
+    # Replaces IN clauses for castes with the full bilingual groups.
     def caste_in_replacer(match):
         col = match.group(1)
         in_content = match.group(2)
         vals = [v[0] or v[1] for v in re.findall(r"'([^']+)'|\"([^\"]+)\"", in_content)]
+        if not vals:
+            return match.group(0)
+            
+        all_conditions = []
         for val in vals:
             val_l = val.strip().lower()
+            matched_group = False
             for group in _CASTE_GROUPS:
                 if val_l in group:
-                    conditions = []
+                    matched_group = True
                     for term in sorted(group, key=lambda x: len(x), reverse=True):
                         formatted = term.title() if term.isascii() else term
-                        conditions.append(f"{col} LIKE '%{formatted}%'")
-                    return "(" + " OR ".join(conditions) + ")"
-        return match.group(0)
+                        all_conditions.append(f"{col} LIKE '%{formatted}%'")
+                    break
+            if not matched_group:
+                all_conditions.append(f"{col} LIKE '%{val}%'")
+                
+        return "(" + " OR ".join(all_conditions) + ")"
 
     sql = re.sub(
         r"\b((?:\w+\.)?caste)\s+IN\s+\(([^)]+)\)",
@@ -295,6 +303,19 @@ def _post_process_sql(sql: str, fuzzy_target: str | None = None) -> str:
         sql, flags=re.IGNORECASE,
     )
 
+    # ── Step 2.5 (new): bank_name IN (...) → UPPER(bank_name) IN (...) ─────────────
+    def bank_in_replacer(match):
+        col = match.group(1)
+        in_content = match.group(2)
+        vals = [v[0] or v[1] for v in re.findall(r"'([^']+)'|\"([^\"]+)\"", in_content)]
+        new_vals = [f"'{v.strip().upper()}'" for v in vals]
+        return f"UPPER({col}) IN ({', '.join(new_vals)})"
+
+    sql = re.sub(
+        r"\b((?:\w+\.)?bank_name)\s+IN\s+\(([^)]+)\)",
+        bank_in_replacer, sql, flags=re.IGNORECASE,
+    )
+
     # ── Step 3: Categorical value normalization ───────────────────────────────
     # The real dataset will have GEN/General/GENERAL/general, Widow/widow/WIDOW,
     # Male/male/MALE, etc. Normalize everything to the canonical stored value.
@@ -347,6 +368,54 @@ def _post_process_sql(sql: str, fuzzy_target: str | None = None) -> str:
     sql = re.sub(
         rf'\b((?:\w+\.)?(?:{_CAT_COLS}))\s*=\s*"([^"]+)"',
         cat_replacer, sql, flags=re.IGNORECASE,
+    )
+
+    # ── Step 3.5: Categorical IN Clause Casing Normalization ──────────────────
+    def cat_in_replacer(match):
+        col_raw = match.group(1)
+        col = col_raw.lower()
+        in_content = match.group(2)
+        vals = [v[0] or v[1] for v in re.findall(r"'([^']+)'|\"([^\"]+)\"", in_content)]
+        
+        new_vals = []
+        for val in vals:
+            val_l = val.strip().lower()
+            if "gender" in col:
+                if val_l in ("male", "m"):
+                    new_vals.append("'Male'")
+                elif val_l in ("female", "f"):
+                    new_vals.append("'Female'")
+                else:
+                    new_vals.append(f"'{val}'")
+            elif "caste_category" in col:
+                if val_l in ("sc", "scheduled caste", "dalit"):
+                    new_vals.append("'SC'")
+                elif val_l in ("st", "scheduled tribe", "tribal", "adivasi"):
+                    new_vals.append("'ST'")
+                elif val_l in ("obc", "other backward class", "other backward caste", "other backward", "backward class"):
+                    new_vals.append("'OBC'")
+                elif val_l in ("gen", "general", "general category", "open", "unreserved", "ur", "forward", "forward caste"):
+                    new_vals.append("'GEN'")
+                else:
+                    new_vals.append(f"'{val.upper()}'")
+            elif "marital_status" in col:
+                if val_l in ("married",):
+                    new_vals.append("'Married'")
+                elif val_l in ("unmarried", "single", "never married", "bachelor", "spinster"):
+                    new_vals.append("'Unmarried'")
+                elif val_l in ("widow", "widowed", "widower"):
+                    new_vals.append("'Widow'")
+                else:
+                    new_vals.append(f"'{val}'")
+            else:
+                new_vals.append(f"'{val}'")
+                
+        return f"{col_raw} IN ({', '.join(new_vals)})"
+
+    _CAT_COLS = r"gender|caste_category|marital_status"
+    sql = re.sub(
+        rf"\b((?:\w+\.)?(?:{_CAT_COLS}))\s+IN\s+\(([^)]+)\)",
+        cat_in_replacer, sql, flags=re.IGNORECASE,
     )
 
     # ── Step 4 (new): Categorical LIKE → = ────────────────────────────────
@@ -433,6 +502,37 @@ def _post_process_sql(sql: str, fuzzy_target: str | None = None) -> str:
     sql = re.sub(
         r"\b((?:\w+\.)?district)\s+LIKE\s+'%?([^'%]+?)%?'",
         district_like_replacer, sql, flags=re.IGNORECASE,
+    )
+
+    # ── Step 8.5: Redirect district IN clauses containing non-district values ─
+    def district_in_replacer(match: re.Match[str]) -> str:
+        col = match.group(1)
+        in_content = match.group(2)
+        prefix = col.split('.')[0] + "." if '.' in col else ""
+        
+        vals = [v[0] or v[1] for v in re.findall(r"'([^']+)'|\"([^\"]+)\"", in_content)]
+        if not vals:
+            return match.group(0)
+            
+        has_non_district = any(v.lower() not in _DISTRICTS_LOWER for v in vals)
+        
+        if has_non_district:
+            conditions = []
+            for val in vals:
+                val_l = val.strip().lower()
+                if val_l in _DISTRICTS_LOWER:
+                    canonical = _DISTRICT_CANONICAL[val_l]
+                    conditions.append(f"{col} = '{canonical}'")
+                else:
+                    conditions.append(f"({prefix}block LIKE '%{val}%' OR {prefix}village LIKE '%{val}%')")
+            return "(" + " OR ".join(conditions) + ")"
+        else:
+            new_vals = [f"'{_DISTRICT_CANONICAL[v.lower()]}'" for v in vals]
+            return f"{col} IN ({', '.join(new_vals)})"
+
+    sql = re.sub(
+        r"\b((?:\w+\.)?district)\s+IN\s+\(([^)]+)\)",
+        district_in_replacer, sql, flags=re.IGNORECASE,
     )
 
     # ── Step 9: Redirect district → block/village for non-district locations ──
