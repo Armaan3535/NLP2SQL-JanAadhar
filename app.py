@@ -613,12 +613,30 @@ def _fix_education_sql(sql: str, question: str) -> str:
 # Objects with no I/O in __init__ are safe strict singletons.
 # FAISS stores are lazy-loaded but kept as singletons to avoid repeated disk reads.
 
-# ── Stateless singletons: created once, reused on every request ──────────────
-from llm.fast_path import FastPathEngine as _FastPathEngine
-_FAST_ENGINE = _FastPathEngine()
-_PROMPT_BUILDER = PromptBuilder()
-_GENERATOR = OllamaSqlGenerator()
-_VALIDATOR = SQLValidator()
+
+# ── Lazy singletons — created on first use, reused on every subsequent request ─
+# Using getter functions instead of module-level instantiation avoids failures
+# during import (e.g. circular imports when Streamlit re-imports app as a module).
+
+@functools.lru_cache(maxsize=None)
+def _get_fast_engine():
+    from llm.fast_path import FastPathEngine
+    return FastPathEngine()
+
+
+@functools.lru_cache(maxsize=None)
+def _get_prompt_builder():
+    return PromptBuilder()
+
+
+@functools.lru_cache(maxsize=None)
+def _get_generator():
+    return OllamaSqlGenerator()
+
+
+@functools.lru_cache(maxsize=None)
+def _get_validator():
+    return SQLValidator()
 
 
 @functools.lru_cache(maxsize=None)
@@ -684,7 +702,7 @@ def generate_sql_pipeline(
             is_fuzzy = False
 
     # ── Tier 0: Fast Path Check ──
-    fast_sql = _FAST_ENGINE.generate_sql_fast(question)
+    fast_sql = _get_fast_engine().generate_sql_fast(question)
     if fast_sql:
         optimization = None
         if include_optimization and run_query_for_profile:
@@ -722,7 +740,7 @@ def generate_sql_pipeline(
                     idx = int(indexes[0][0])
                     if idx >= 0 and idx < len(cache_store.registry) and score >= 0.85:
                         matched_entry = cache_store.registry[idx]
-                        swapped_sql = _FAST_ENGINE.swap_ast_parameters(
+                        swapped_sql = _get_fast_engine().swap_ast_parameters(
                             matched_entry["sql"], matched_entry["question"], question
                         )
                         if swapped_sql:
@@ -782,9 +800,9 @@ def generate_sql_pipeline(
     few_shot_retriever = FewShotRetriever(few_shot_store)
     retrieved_few_shots = few_shot_retriever.retrieve(normalized.normalized, top_k=3)
 
-    prompt_builder = _PROMPT_BUILDER
-    generator = _GENERATOR
-    validator = _VALIDATOR
+    prompt_builder = _get_prompt_builder()
+    generator = _get_generator()
+    validator = _get_validator()
 
     previous_error: str | None = None
     sql = ""
